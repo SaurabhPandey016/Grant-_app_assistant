@@ -1,0 +1,283 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DocKind {
+  GUIDELINE
+  APPLICATION
+}
+
+enum RunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ReqLevel {
+  MANDATORY
+  RECOMMENDED
+}
+
+enum ReqCategory {
+  ELIGIBILITY
+  SUBMISSION
+  DOCUMENT
+  CONTENT
+  OTHER
+}
+
+enum EvidenceStatus {
+  SUPPORTED
+  PARTIAL
+  AMBIGUOUS
+  MISSING
+}
+
+enum ReviewDecision {
+  PENDING
+  CONFIRMED
+  CORRECTED
+  REJECTED
+}
+
+enum SupportDocStatus {
+  PROVIDED
+  MISSING
+  NOT_APPLICABLE
+}
+
+enum QuestionStatus {
+  OPEN
+  ANSWERED
+  DISMISSED
+}
+
+enum ClaimDecision {
+  PENDING
+  CONFIRMED_ISSUE
+  DISMISSED
+}
+
+model User {
+  id               String          @id @default(cuid())
+  email            String          @unique
+  name             String
+  passwordHash     String
+  assessments      Assessment[]
+  reviewedMappings Mapping[]       @relation("MappingReviewer")
+  reviewSummaries  ReviewSummary[] @relation("SummaryGenerator")
+  auditEvents      AuditEvent[]    @relation("AuditActor")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([createdAt])
+}
+
+model Assessment {
+  id                          String               @id @default(cuid())
+  userId                      String
+  name                        String
+  currentGuidelineVersionId   String?
+  currentApplicationVersionId String?
+  user                        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentGuidelineVersion     DocumentVersion?     @relation("CurrentGuidelineVersion", fields: [currentGuidelineVersionId], references: [id], onDelete: SetNull)
+  currentApplicationVersion   DocumentVersion?     @relation("CurrentApplicationVersion", fields: [currentApplicationVersionId], references: [id], onDelete: SetNull)
+  documentVersions            DocumentVersion[]    @relation("AssessmentDocumentVersions")
+  supportingDocuments         SupportingDocument[]
+  analysisRuns                AnalysisRun[]
+  auditEvents                 AuditEvent[]
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+
+  @@index([userId, updatedAt])
+  @@index([currentGuidelineVersionId])
+  @@index([currentApplicationVersionId])
+}
+
+model DocumentVersion {
+  id                    String          @id @default(cuid())
+  assessmentId          String
+  kind                  DocKind
+  versionNo             Int
+  title                 String
+  content               String          @db.Text
+  contentHash           String
+  segments              Json
+  assessment            Assessment      @relation("AssessmentDocumentVersions", fields: [assessmentId], references: [id], onDelete: Cascade)
+  currentForGuideline   Assessment[]    @relation("CurrentGuidelineVersion")
+  currentForApplication Assessment[]    @relation("CurrentApplicationVersion")
+  guidelineRuns         AnalysisRun[]   @relation("RunGuidelineVersion")
+  applicationRuns       AnalysisRun[]   @relation("RunApplicationVersion")
+  guidelineSummaries    ReviewSummary[] @relation("SummaryGuidelineVersion")
+  applicationSummaries  ReviewSummary[] @relation("SummaryApplicationVersion")
+  createdAt             DateTime        @default(now())
+
+  @@unique([assessmentId, kind, versionNo])
+  @@index([assessmentId, kind, createdAt])
+  @@index([contentHash])
+}
+
+model SupportingDocument {
+  id            String           @id @default(cuid())
+  assessmentId  String
+  name          String
+  docType       String
+  status        SupportDocStatus
+  notes         String?          @db.Text
+  requirementId String?
+  assessment    Assessment       @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  requirement   Requirement?     @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([assessmentId, status])
+  @@index([requirementId])
+}
+
+model AnalysisRun {
+  id                     String                  @id @default(cuid())
+  assessmentId           String
+  guidelineVersionId     String
+  applicationVersionId   String
+  status                 RunStatus
+  provider               String
+  model                  String
+  promptVersion          String
+  error                  String?                 @db.Text
+  startedAt              DateTime                @default(now())
+  finishedAt             DateTime?
+  assessment             Assessment              @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  guidelineVersion       DocumentVersion         @relation("RunGuidelineVersion", fields: [guidelineVersionId], references: [id], onDelete: Restrict)
+  applicationVersion     DocumentVersion         @relation("RunApplicationVersion", fields: [applicationVersionId], references: [id], onDelete: Restrict)
+  requirements           Requirement[]
+  clarificationQuestions ClarificationQuestion[]
+  unsupportedClaims      UnsupportedClaim[]
+  reviewSummaries        ReviewSummary[]
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  @@index([assessmentId, startedAt])
+  @@index([guidelineVersionId])
+  @@index([applicationVersionId])
+  @@index([status, startedAt])
+}
+
+model Requirement {
+  id                     String                  @id @default(cuid())
+  runId                  String
+  code                   String
+  text                   String                  @db.Text
+  category               ReqCategory
+  aiLevel                ReqLevel
+  levelOverride          ReqLevel?
+  levelDisputed          Boolean                 @default(false)
+  sourceSegmentId        String
+  sourceQuote            String                  @db.Text
+  sourceVerified         Boolean                 @default(false)
+  needsDocument          Boolean                 @default(false)
+  documentType           String?
+  run                    AnalysisRun             @relation(fields: [runId], references: [id], onDelete: Cascade)
+  mapping                Mapping?
+  supportingDocuments    SupportingDocument[]
+  clarificationQuestions ClarificationQuestion[]
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+
+  @@unique([runId, code])
+  @@index([runId, aiLevel])
+  @@index([runId, category])
+}
+
+model Mapping {
+  id               String          @id @default(cuid())
+  requirementId    String          @unique
+  aiStatus         EvidenceStatus
+  rationale        String          @db.Text
+  evidence         Json
+  allVerified      Boolean         @default(false)
+  reviewDecision   ReviewDecision  @default(PENDING)
+  reviewerStatus   EvidenceStatus?
+  reviewerEvidence Json?
+  reviewerNote     String?         @db.Text
+  reviewedById     String?
+  reviewedAt       DateTime?
+  requirement      Requirement     @relation(fields: [requirementId], references: [id], onDelete: Cascade)
+  reviewedBy       User?           @relation("MappingReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([reviewDecision, updatedAt])
+  @@index([reviewedById])
+}
+
+model ClarificationQuestion {
+  id            String         @id @default(cuid())
+  runId         String
+  requirementId String?
+  question      String         @db.Text
+  reason        String         @db.Text
+  status        QuestionStatus @default(OPEN)
+  answer        String?        @db.Text
+  run           AnalysisRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  requirement   Requirement?   @relation(fields: [requirementId], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([runId, status])
+  @@index([requirementId])
+}
+
+model UnsupportedClaim {
+  id             String        @id @default(cuid())
+  runId          String
+  segmentId      String
+  quote          String        @db.Text
+  quoteVerified  Boolean       @default(false)
+  reason         String        @db.Text
+  reviewDecision ClaimDecision @default(PENDING)
+  run            AnalysisRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([runId, reviewDecision])
+}
+
+model ReviewSummary {
+  id                   String          @id @default(cuid())
+  runId                String
+  content              Json
+  guidelineVersionId   String
+  applicationVersionId String
+  generatedById        String
+  run                  AnalysisRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  guidelineVersion     DocumentVersion @relation("SummaryGuidelineVersion", fields: [guidelineVersionId], references: [id], onDelete: Restrict)
+  applicationVersion   DocumentVersion @relation("SummaryApplicationVersion", fields: [applicationVersionId], references: [id], onDelete: Restrict)
+  generatedBy          User            @relation("SummaryGenerator", fields: [generatedById], references: [id], onDelete: Restrict)
+  createdAt            DateTime        @default(now())
+
+  @@index([runId, createdAt])
+  @@index([guidelineVersionId])
+  @@index([applicationVersionId])
+  @@index([generatedById])
+}
+
+model AuditEvent {
+  id           String      @id @default(cuid())
+  assessmentId String?
+  actorId      String?
+  action       String
+  entityType   String
+  entityId     String
+  metadata     Json        @default("{}")
+  assessment   Assessment? @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  actor        User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+
+  @@index([assessmentId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+}

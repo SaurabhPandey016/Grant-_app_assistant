@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Organization registration certificate",
+    "docType": "REGISTRATION_CERTIFICATE",
+    "status": "PROVIDED",
+    "notes": "Listed as included with the draft application."
+  },
+  {
+    "name": "Most recent audited accounts",
+    "docType": "AUDITED_ACCOUNTS",
+    "status": "MISSING",
+    "notes": "Not collected for this draft."
+  },
+  {
+    "name": "Community partner letters of support",
+    "docType": "LETTERS_OF_SUPPORT",
+    "status": "MISSING",
+    "notes": "Not collected for this draft."
+  }
+]
