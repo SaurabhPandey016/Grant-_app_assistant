@@ -20,9 +20,11 @@ const supportingDocumentCreateSchema = z.object({
   docType: z.string().trim().min(1).max(120),
   status: z.enum(['PROVIDED', 'MISSING', 'NOT_APPLICABLE']),
   notes: z.string().max(5000).nullable().optional(),
+  requirementId: z.string().min(1).nullable().optional(),
 }).strict();
 
 const supportingDocumentUpdateSchema = supportingDocumentCreateSchema.partial()
+  .extend({ requirementId: z.string().min(1).nullable().optional() })
   .strict()
   .refine((body) => Object.keys(body).length > 0, 'At least one field must be provided.');
 

@@ -3,6 +3,7 @@ import { createAssessmentController, createDocumentController } from '../control
 import { asyncHandler } from '../middleware/async-handler.js';
 import { documentUpload } from '../middleware/document-upload.js';
 import { requireAuth } from '../middleware/require-auth.js';
+import { validatePathParam } from '../middleware/validate-path-param.js';
 import { authService } from '../services/auth.service.js';
 import { assessmentService } from '../services/assessment.service.js';
 
@@ -13,6 +14,8 @@ export function createAssessmentRouter({
   const router = Router();
   const controller = createAssessmentController(service);
 
+  router.param('id', validatePathParam());
+  router.param('documentId', validatePathParam());
   router.use(requireAuth(authenticationService));
   router.post('/', asyncHandler(controller.create));
   router.get('/', asyncHandler(controller.list));
@@ -35,6 +38,7 @@ export function createDocumentRouter({
 } = {}) {
   const router = Router();
   const controller = createDocumentController(service);
+  router.param('versionId', validatePathParam());
   router.get('/:versionId', requireAuth(authenticationService), asyncHandler(controller.getById));
   return router;
 }

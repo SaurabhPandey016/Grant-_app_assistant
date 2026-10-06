@@ -123,6 +123,20 @@ export function createAssessmentService({
 
   async function createSupportingDocument(input) {
     const document = await repository.createSupportingDocumentForUser(input);
+    if (document?.invalidRequirement) {
+      throw new AppError({
+        code: 'INVALID_REQUIREMENT_LINK',
+        message: 'The requirement cannot be linked to this supporting document.',
+        httpStatus: 400,
+      });
+    }
+    if (document?.invalidDocType) {
+      throw new AppError({
+        code: 'SUPPORTING_DOCUMENT_TYPE_MISMATCH',
+        message: 'The supporting document type does not match the requirement.',
+        httpStatus: 400,
+      });
+    }
     if (!document) {
       throw notFoundError('ASSESSMENT_NOT_FOUND', 'Assessment not found.');
     }
@@ -141,6 +155,20 @@ export function createAssessmentService({
       userId,
       changes,
     );
+    if (document?.invalidRequirement) {
+      throw new AppError({
+        code: 'INVALID_REQUIREMENT_LINK',
+        message: 'The requirement cannot be linked to this supporting document.',
+        httpStatus: 400,
+      });
+    }
+    if (document?.invalidDocType) {
+      throw new AppError({
+        code: 'SUPPORTING_DOCUMENT_TYPE_MISMATCH',
+        message: 'The supporting document type does not match the requirement.',
+        httpStatus: 400,
+      });
+    }
     if (!document) {
       throw notFoundError('SUPPORTING_DOCUMENT_NOT_FOUND', 'Supporting document not found.');
     }

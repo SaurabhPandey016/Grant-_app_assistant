@@ -13,7 +13,7 @@ const supportingDocumentSelect = {
 };
 
 /**
- * @param {{ assessmentId: string, userId: string, name: string, docType: string, status: string, notes?: string | null }} input
+ * @param {{ assessmentId: string, userId: string, name: string, docType: string, status: string, notes?: string | null, requirementId?: string | null }} input
  */
 export async function createSupportingDocumentForUser(input) {
   return prisma.$transaction(async (transaction) => {
@@ -24,6 +24,13 @@ export async function createSupportingDocumentForUser(input) {
     if (!assessment) {
       return null;
     }
+    const invalidLink = await validateRequirementLink(
+      transaction,
+      input.assessmentId,
+      input.requirementId,
+      input.docType,
+    );
+    if (invalidLink) return invalidLink;
 
     const document = await transaction.supportingDocument.create({
       data: {
@@ -32,6 +39,7 @@ export async function createSupportingDocumentForUser(input) {
         docType: input.docType,
         status: input.status,
         notes: input.notes ?? null,
+        requirementId: input.requirementId ?? null,
       },
       select: supportingDocumentSelect,
     });
@@ -42,7 +50,11 @@ export async function createSupportingDocumentForUser(input) {
         action: 'supporting_document.created',
         entityType: 'SupportingDocument',
         entityId: document.id,
-        metadata: { docType: document.docType, status: document.status },
+        metadata: {
+          docType: document.docType,
+          status: document.status,
+          requirementId: document.requirementId,
+        },
       },
     });
     return document;
@@ -65,17 +77,28 @@ export function listSupportingDocumentsForUser(assessmentId, userId) {
  * @param {string} assessmentId
  * @param {string} documentId
  * @param {string} userId
- * @param {{ name?: string, docType?: string, status?: string, notes?: string | null }} changes
+ * @param {{ name?: string, docType?: string, status?: string, notes?: string | null, requirementId?: string | null }} changes
  */
 export async function updateSupportingDocumentForUser(assessmentId, documentId, userId, changes) {
   return prisma.$transaction(async (transaction) => {
     const existing = await transaction.supportingDocument.findFirst({
       where: { id: documentId, assessmentId, assessment: { userId } },
-      select: { id: true },
+      select: { id: true, docType: true, requirementId: true, status: true },
     });
     if (!existing) {
       return null;
     }
+
+    const requirementId = changes.requirementId === undefined
+      ? existing.requirementId
+      : changes.requirementId;
+    const invalidLink = await validateRequirementLink(
+      transaction,
+      assessmentId,
+      requirementId,
+      changes.docType ?? existing.docType,
+    );
+    if (invalidLink) return invalidLink;
 
     const document = await transaction.supportingDocument.update({
       where: { id: documentId },
@@ -89,11 +112,43 @@ export async function updateSupportingDocumentForUser(assessmentId, documentId, 
         action: 'supporting_document.updated',
         entityType: 'SupportingDocument',
         entityId: document.id,
-        metadata: { updatedFields: Object.keys(changes) },
+        metadata: {
+          before: {
+            docType: existing.docType,
+            requirementId: existing.requirementId,
+            status: existing.status,
+          },
+          after: {
+            docType: document.docType,
+            requirementId: document.requirementId,
+            status: document.status,
+          },
+          updatedFields: Object.keys(changes),
+        },
       },
     });
     return document;
   });
+}
+
+function normalizeDocumentType(value) {
+  return value?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? '';
+}
+
+async function validateRequirementLink(transaction, assessmentId, requirementId, docType) {
+  if (!requirementId) return null;
+  const requirement = await transaction.requirement.findFirst({
+    where: { id: requirementId, run: { assessmentId } },
+    select: { id: true, documentType: true },
+  });
+  if (!requirement) return { invalidRequirement: true };
+  if (
+    requirement.documentType
+    && normalizeDocumentType(docType) !== normalizeDocumentType(requirement.documentType)
+  ) {
+    return { invalidDocType: true };
+  }
+  return null;
 }
 
 /**

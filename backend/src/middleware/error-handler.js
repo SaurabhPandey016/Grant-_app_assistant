@@ -1,3 +1,5 @@
+import { logger } from '../lib/logger.js';
+
 /**
  * @typedef {{ code: string, message: string, httpStatus: number, details?: unknown }} AppErrorShape
  */
@@ -47,8 +49,8 @@ export function errorHandler(error, request, response, next) {
         : 'An unexpected error occurred.';
   const details = isAppError ? error.details : undefined;
 
-  request.log.error(
-    { errorCode: code },
+  (request.log ?? logger).error(
+    { errorCode: code, errorName: error?.name ?? 'Error' },
     'Request failed',
   );
 

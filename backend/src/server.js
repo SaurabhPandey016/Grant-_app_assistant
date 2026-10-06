@@ -11,7 +11,10 @@ async function shutDown(signal) {
   logger.info({ signal }, 'Shutting down backend server');
   server.close(async (error) => {
     if (error) {
-      logger.error({ err: error }, 'Failed to close HTTP server');
+      logger.error({
+        errorName: error.name,
+        errorCode: error.code,
+      }, 'Failed to close HTTP server');
       process.exitCode = 1;
     }
     await disconnectDatabase();

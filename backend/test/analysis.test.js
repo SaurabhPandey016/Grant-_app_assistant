@@ -146,7 +146,7 @@ describe('analysis API', () => {
       .post('/assessments/assessment-1/analysis')
       .set(auth);
 
-    assert.equal(response.status, 201);
+    assert.equal(response.status, 201, `${response.text} ${JSON.stringify(response.body)}`);
     const saved = context.events.find(({ type }) => type === 'completed').input;
     assert.equal(saved.requirements.length, 2);
     assert.equal(saved.requirements[0].sourceVerified, true);

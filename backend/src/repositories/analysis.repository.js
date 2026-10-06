@@ -236,3 +236,233 @@ export function listAnalysisRunsForUser(assessmentId, userId) {
     });
   });
 }
+
+/**
+ * @param {string} requirementId
+ * @param {string} userId
+ * @param {{ decision: string, reviewerStatus?: string, evidence?: object[], note?: string | null }} input
+ */
+export function reviewMappingForUser(requirementId, userId, input) {
+  return prisma.$transaction(async (transaction) => {
+    const existing = await transaction.mapping.findFirst({
+      where: { requirementId, requirement: { run: { assessment: { userId } } } },
+      include: {
+        requirement: {
+          include: {
+            run: {
+              include: {
+                assessment: {
+                  select: {
+                    id: true,
+                    currentGuidelineVersionId: true,
+                    currentApplicationVersionId: true,
+                  },
+                },
+                applicationVersion: { select: { segments: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!existing) return null;
+
+    const before = auditMappingState(existing);
+    const updated = await transaction.mapping.update({
+      where: { id: existing.id },
+      data: {
+        reviewDecision: input.decision,
+        reviewerStatus: input.decision === 'CORRECTED' ? input.reviewerStatus : null,
+        ...(input.evidence === undefined
+          ? {}
+          : { reviewerEvidence: input.evidence }),
+        reviewerNote: input.note ?? null,
+        reviewedById: userId,
+        reviewedAt: new Date(),
+      },
+    });
+    await transaction.auditEvent.create({
+      data: {
+        assessmentId: existing.requirement.run.assessment.id,
+        actorId: userId,
+        action: 'mapping.reviewed',
+        entityType: 'Mapping',
+        entityId: existing.id,
+        metadata: {
+          before,
+          after: auditMappingState(updated),
+        },
+      },
+    });
+    return {
+      mapping: updated,
+      requirement: existing.requirement,
+      applicationSegments: existing.requirement.run.applicationVersion.segments,
+      assessment: existing.requirement.run.assessment,
+    };
+  });
+}
+
+/**
+ * @param {string} requirementId
+ * @param {string} userId
+ */
+export function findMappingReviewContextForUser(requirementId, userId) {
+  return prisma.mapping.findFirst({
+    where: { requirementId, requirement: { run: { assessment: { userId } } } },
+    select: {
+      requirement: {
+        select: {
+          run: {
+            select: {
+              guidelineVersionId: true,
+              applicationVersionId: true,
+              applicationVersion: { select: { segments: true } },
+              assessment: {
+                select: {
+                  currentGuidelineVersionId: true,
+                  currentApplicationVersionId: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+/**
+ * @param {string} requirementId
+ * @param {string} userId
+ * @param {'MANDATORY' | 'RECOMMENDED' | null} levelOverride
+ */
+export function updateRequirementLevelForUser(requirementId, userId, levelOverride) {
+  return prisma.$transaction(async (transaction) => {
+    const requirement = await transaction.requirement.findFirst({
+      where: { id: requirementId, run: { assessment: { userId } } },
+      include: { run: { include: { assessment: { select: { id: true } } } } },
+    });
+    if (!requirement) return null;
+    const updated = await transaction.requirement.update({
+      where: { id: requirementId },
+      data: { levelOverride },
+    });
+    await transaction.auditEvent.create({
+      data: {
+        assessmentId: requirement.run.assessment.id,
+        actorId: userId,
+        action: 'requirement.level.updated',
+        entityType: 'Requirement',
+        entityId: requirementId,
+        metadata: {
+          before: { levelOverride: requirement.levelOverride },
+          after: { levelOverride: updated.levelOverride },
+        },
+      },
+    });
+    return updated;
+  });
+}
+
+/**
+ * @param {string} questionId
+ * @param {string} userId
+ * @param {{ status: string, answer?: string | null }} changes
+ */
+export function updateQuestionForUser(questionId, userId, changes) {
+  return prisma.$transaction(async (transaction) => {
+    const question = await transaction.clarificationQuestion.findFirst({
+      where: { id: questionId, run: { assessment: { userId } } },
+      include: { run: { select: { assessmentId: true } } },
+    });
+    if (!question) return null;
+    const updated = await transaction.clarificationQuestion.update({
+      where: { id: questionId },
+      data: changes,
+    });
+    await transaction.auditEvent.create({
+      data: {
+        assessmentId: question.run.assessmentId,
+        actorId: userId,
+        action: 'clarification_question.updated',
+        entityType: 'ClarificationQuestion',
+        entityId: questionId,
+        metadata: {
+          before: { status: question.status, answer: question.answer },
+          after: { status: updated.status, answer: updated.answer },
+        },
+      },
+    });
+    return updated;
+  });
+}
+
+/**
+ * @param {string} claimId
+ * @param {string} userId
+ * @param {string} reviewDecision
+ */
+export function updateClaimForUser(claimId, userId, reviewDecision) {
+  return prisma.$transaction(async (transaction) => {
+    const claim = await transaction.unsupportedClaim.findFirst({
+      where: { id: claimId, run: { assessment: { userId } } },
+      include: { run: { select: { assessmentId: true } } },
+    });
+    if (!claim) return null;
+    const updated = await transaction.unsupportedClaim.update({
+      where: { id: claimId },
+      data: { reviewDecision },
+    });
+    await transaction.auditEvent.create({
+      data: {
+        assessmentId: claim.run.assessmentId,
+        actorId: userId,
+        action: 'unsupported_claim.reviewed',
+        entityType: 'UnsupportedClaim',
+        entityId: claimId,
+        metadata: {
+          before: { reviewDecision: claim.reviewDecision },
+          after: { reviewDecision: updated.reviewDecision },
+        },
+      },
+    });
+    return updated;
+  });
+}
+
+/**
+ * @param {string} assessmentId
+ * @param {string} userId
+ */
+export function findCompletionDataForUser(assessmentId, userId) {
+  return prisma.assessment.findFirst({
+    where: { id: assessmentId, userId },
+    select: {
+      id: true,
+      currentGuidelineVersionId: true,
+      currentApplicationVersionId: true,
+      analysisRuns: {
+        orderBy: { startedAt: 'desc' },
+        take: 1,
+        include: {
+          requirements: { include: { mapping: true } },
+        },
+      },
+      supportingDocuments: {
+        select: { id: true, name: true, docType: true, status: true, requirementId: true },
+      },
+    },
+  });
+}
+
+function auditMappingState(mapping) {
+  return {
+    reviewDecision: mapping.reviewDecision,
+    reviewerStatus: mapping.reviewerStatus,
+    reviewerNote: mapping.reviewerNote,
+    reviewerEvidenceCount: Array.isArray(mapping.reviewerEvidence)
+      ? mapping.reviewerEvidence.length
+      : 0,
+  };
+}

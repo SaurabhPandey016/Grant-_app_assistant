@@ -90,7 +90,7 @@ function createTestContext() {
         docType: input.docType,
         status: input.status,
         notes: input.notes ?? null,
-        requirementId: null,
+        requirementId: input.requirementId ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -306,6 +306,7 @@ describe('assessment and document APIs', () => {
         name: 'Registration certificate',
         docType: 'REGISTRATION_CERTIFICATE',
         status: 'PROVIDED',
+        requirementId: 'requirement-registration-certificate',
       });
     const listed = await request(context.app)
       .get(`/assessments/${assessmentId}/supporting-documents`)
@@ -313,14 +314,20 @@ describe('assessment and document APIs', () => {
     const updated = await request(context.app)
       .patch(`/assessments/${assessmentId}/supporting-documents/${created.body.supportingDocument.id}`)
       .set(userOne)
-      .send({ status: 'MISSING', notes: 'Please upload an updated copy.' });
+      .send({
+        status: 'MISSING',
+        notes: 'Please upload an updated copy.',
+        requirementId: 'requirement-registration-certificate',
+      });
     const deleted = await request(context.app)
       .delete(`/assessments/${assessmentId}/supporting-documents/${created.body.supportingDocument.id}`)
       .set(userOne);
 
     assert.equal(created.status, 201);
+    assert.equal(created.body.supportingDocument.requirementId, 'requirement-registration-certificate');
     assert.equal(listed.body.supportingDocuments.length, 1);
     assert.equal(updated.body.supportingDocument.status, 'MISSING');
+    assert.equal(updated.body.supportingDocument.requirementId, 'requirement-registration-certificate');
     assert.equal(deleted.status, 204);
   });
 

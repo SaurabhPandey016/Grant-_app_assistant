@@ -13,7 +13,9 @@ General expectations: usable frontend, working backend, basic persistence, funct
 ## Project decisions
 
 - The backend will follow the plain-JavaScript ES module and MVC requirements in `.github/copilot-instructions.md`; the frontend will use Next.js App Router with strict TypeScript.
-- AI results will be treated as validated suggestions. Human review decisions will be stored separately, and deterministic application logic will calculate completion.
-- Guideline and application documents will be versioned immutably. Any assessment whose latest analysis run references different current document versions will be marked stale.
-- The application will present a clear disclaimer and will not make authoritative legal or funding-eligibility decisions.
-- This repository is a documentation and folder scaffold only at this stage; implementation, dependencies, persistence technology, and deployment target have not yet been selected.
+- Backend request and AI-output contracts use zod; important JavaScript data shapes use JSDoc. Prisma 7.10.0 with PostgreSQL is used for persistence; repositories are the only layer that imports Prisma.
+- AI results are validated suggestions. Human review decisions are stored separately, and deterministic domain code calculates completion.
+- Guideline and application documents are versioned immutably. An assessment is marked stale when its latest run references different current document versions.
+- The application presents a clear disclaimer and does not make authoritative legal or funding-eligibility decisions.
+- The implemented AI providers are an OpenAI-compatible provider and a deterministic offline heuristic provider. Live AI configuration is optional.
+- Hosting has not been selected or configured in this repository; deployment platforms described in the README are options, not a deployed environment.
