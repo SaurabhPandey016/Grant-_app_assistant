@@ -5,6 +5,8 @@ import {
   failAnalysisRun,
   findLatestAnalysisForUser,
   listAnalysisRunsForUser,
+  findAnalysisRunForUser,
+  failInterruptedAnalysisRuns,
   startAnalysisRunForUser,
 } from '../repositories/analysis.repository.js';
 import { aiService } from '../ai/index.js';
@@ -23,10 +25,13 @@ const SAFE_FAILURE_MESSAGE = 'Analysis failed. Please try again.';
  *    completeAnalysisRun: typeof completeAnalysisRun,
  *    failAnalysisRun: typeof failAnalysisRun,
  *    findLatestAnalysisForUser: typeof findLatestAnalysisForUser,
- *    listAnalysisRunsForUser: typeof listAnalysisRunsForUser
+ *    listAnalysisRunsForUser: typeof listAnalysisRunsForUser,
+ *    findAnalysisRunForUser: typeof findAnalysisRunForUser,
+ *    failInterruptedAnalysisRuns: typeof failInterruptedAnalysisRuns
  *  },
  *  ai?: typeof aiService,
  *  logger?: import('pino').Logger,
+ *  schedule?: (task: () => Promise<void>) => void,
  *  provider?: string,
  *  model?: string,
  *  promptVersion?: string
@@ -39,14 +44,17 @@ export function createAnalysisService({
     failAnalysisRun,
     findLatestAnalysisForUser,
     listAnalysisRunsForUser,
+    findAnalysisRunForUser,
+    failInterruptedAnalysisRuns,
   },
   ai = aiService,
   logger = defaultLogger,
+  schedule = (task) => { setImmediate(() => { void task(); }); },
   provider = env.LLM_PROVIDER === 'heuristic' ? 'heuristic' : 'openai-compatible',
   model = env.LLM_PROVIDER === 'heuristic' ? 'deterministic-rules-v1' : env.LLM_MODEL,
   promptVersion = PROMPT_VERSION,
 } = {}) {
-  async function runAnalysis(assessmentId, userId) {
+  async function startAnalysis(assessmentId, userId) {
     const started = await repository.startAnalysisRunForUser({
       assessmentId,
       userId,
@@ -72,6 +80,11 @@ export function createAnalysisService({
       });
     }
 
+    schedule(() => processStartedRun(started, userId));
+    return started.run;
+  }
+
+  async function processStartedRun(started, userId) {
     const { run } = started;
     try {
       const guidelineSegments = readSegments(started.guidelineVersion.segments);
@@ -86,7 +99,7 @@ export function createAnalysisService({
         promptVersion: output.promptVersion,
         ...prepared,
       });
-      return { run: completedRun, ...prepared, aiUnavailable: output.aiUnavailable };
+      return completedRun;
     } catch (error) {
       try {
         await repository.failAnalysisRun({
@@ -106,13 +119,26 @@ export function createAnalysisService({
         errorName: error?.name ?? 'Error',
         errorCode: error?.code,
       }, 'Analysis run failed');
-      if (error instanceof AppError) throw error;
+      return null;
+    }
+  }
+
+  async function getAnalysisRun(assessmentId, runId, userId) {
+    const run = await repository.findAnalysisRunForUser(assessmentId, runId, userId);
+    if (!run) {
       throw new AppError({
-        code: 'ANALYSIS_FAILED',
-        message: SAFE_FAILURE_MESSAGE,
-        httpStatus: 502,
+        code: 'ANALYSIS_RUN_NOT_FOUND',
+        message: 'Analysis run not found.',
+        httpStatus: 404,
       });
     }
+    return run;
+  }
+
+  async function failInterruptedRunsOnStartup() {
+    return repository.failInterruptedAnalysisRuns({
+      message: 'Analysis was interrupted by a service restart. Please run it again.',
+    });
   }
 
   async function getLatestAnalysis(assessmentId, userId) {
@@ -135,7 +161,13 @@ export function createAnalysisService({
     return runs;
   }
 
-  return { runAnalysis, getLatestAnalysis, listAnalysisRuns };
+  return {
+    startAnalysis,
+    getAnalysisRun,
+    getLatestAnalysis,
+    listAnalysisRuns,
+    failInterruptedRunsOnStartup,
+  };
 }
 
 /** @typedef {ReturnType<typeof createAnalysisService>} AnalysisService */

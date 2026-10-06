@@ -17,6 +17,20 @@ const envSchema = z.object({
     (value) => (value === undefined || value === '' ? 'false' : value),
     z.enum(['true', 'false']).transform((value) => value === 'true'),
   ),
+  CORS_ORIGINS: z.preprocess(
+    (value) => (value === '' || value === undefined ? [] : value),
+    z.union([
+      z.array(z.string()),
+      z.string().transform((value) => value.split(',').map((origin) => origin.trim()).filter(Boolean)),
+    ]).pipe(
+      z.array(z.string().url())
+        .refine(
+          (origins) => origins.every((origin) => new URL(origin).origin === origin),
+          'CORS_ORIGINS must contain origins without paths.',
+        )
+        .transform((origins) => [...new Set(origins)]),
+    ),
+  ).default([]),
   LLM_PROVIDER: z.preprocess(
     (value) => (value === '' ? undefined : value),
     z.enum(['heuristic', 'openai-compatible']).default('heuristic'),

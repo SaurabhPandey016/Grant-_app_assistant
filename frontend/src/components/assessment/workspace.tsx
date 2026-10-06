@@ -15,7 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DocumentPanel } from "@/components/assessment/document-panel";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,11 @@ import {
   SummaryPanel,
   SupportingPanel,
 } from "@/components/assessment/review-tabs";
-import type { ApiAnalysisResponse } from "@/lib/types";
+import type {
+  ApiAnalysisResponse,
+  ApiAnalysisRunResponse,
+  ApiAnalysisStartResponse,
+} from "@/lib/types";
 
 const tabs: Array<{ id: WorkspaceTab; label: string; icon: LucideIcon }> = [
   { id: "documents", label: "Documents", icon: FileText },
@@ -52,8 +56,21 @@ type WorkspaceTab = "documents" | "checklist" | "questions" | "claims" | "suppor
 export function AssessmentWorkspace({ assessmentId }: { assessmentId: string }) {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("documents");
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const assessmentQuery = useAssessment(assessmentId);
   const statusQuery = useAssessmentStatus(assessmentId);
+  const pollRunId = activeRunId ?? statusQuery.data?.latestRun?.id ?? null;
+  const analysisRunQuery = useQuery({
+    queryKey: ["analysis-run", assessmentId, pollRunId],
+    queryFn: () => apiRequest<ApiAnalysisRunResponse>(
+      `/api/assessments/${assessmentId}/analysis/runs/${pollRunId}`,
+    ),
+    enabled: Boolean(pollRunId),
+    refetchInterval: (query) => (
+      query.state.data?.run.status === "RUNNING" ? 2000 : false
+    ),
+  });
   const completionQuery = useAssessmentCompletion(assessmentId, Boolean(statusQuery.data));
   const analysisQuery = useQuery({
     queryKey: ["analysis-latest", assessmentId],
@@ -72,21 +89,34 @@ export function AssessmentWorkspace({ assessmentId }: { assessmentId: string }) 
   });
   const runAnalysis = useMutation({
     mutationFn: () =>
-      apiRequest<ApiAnalysisResponse>(`/api/assessments/${assessmentId}/analysis`, {
+      apiRequest<ApiAnalysisStartResponse>(`/api/assessments/${assessmentId}/analysis`, {
         method: "POST",
       }),
     onSuccess: async (response) => {
+        activeRunIdRef.current = response.run.id;
+        setActiveRunId(response.run.id);
+      toast.info("Analysis started.");
       await invalidateAssessmentQueries(queryClient, assessmentId);
-      if (response.analysis.aiUnavailable || response.analysis.provider === "heuristic-fallback") {
-        toast.warning("Analysis complete; AI was unavailable, so heuristic results are shown.");
-      } else {
-        toast.success("Analysis complete.");
-      }
     },
     onError: (error) => {
       toast.error(error.message || "Analysis failed. Please retry.");
     },
   });
+  useEffect(() => {
+    const run = analysisRunQuery.data?.run;
+    if (!run || run.status === "RUNNING") return;
+
+    void invalidateAssessmentQueries(queryClient, assessmentId);
+    if (run.id === activeRunId) {
+      if (activeRunIdRef.current !== run.id) return;
+      activeRunIdRef.current = null;
+      if (run.status === "COMPLETED") {
+        toast.success("Analysis complete.");
+      } else {
+        toast.error(run.error || "Analysis failed. Please retry.");
+      }
+    }
+  }, [activeRunId, analysisRunQuery.data, assessmentId, queryClient]);
 
   if (assessmentQuery.isLoading || statusQuery.isLoading) {
     return <LoadingSkeleton rows={4} />;
@@ -110,7 +140,9 @@ export function AssessmentWorkspace({ assessmentId }: { assessmentId: string }) 
   const status = statusQuery.data;
   const completion = completionQuery.data;
   const completedAnalysis = analysisQuery.data;
-  const running = runAnalysis.isPending || status.latestRun?.status === "RUNNING";
+  const running = runAnalysis.isPending
+    || status.latestRun?.status === "RUNNING"
+    || analysisRunQuery.data?.run.status === "RUNNING";
   const canRunAnalysis = Boolean(
     status.currentGuidelineVersion && status.currentApplicationVersion,
   );
@@ -192,11 +224,13 @@ export function AssessmentWorkspace({ assessmentId }: { assessmentId: string }) 
             <p><strong>AI was unavailable; heuristic results.</strong> Review these deterministic suggestions carefully.</p>
           </div>
         ) : null}
-        {runAnalysis.error ? (
+        {runAnalysis.error || status.latestRun?.status === "FAILED" ? (
           <div className="mt-4 flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950 sm:flex-row sm:items-center sm:justify-between" role="alert">
             <div>
               <p className="font-semibold">Analysis failed</p>
-              <p className="mt-1">{runAnalysis.error.message}</p>
+              <p className="mt-1">
+                {runAnalysis.error?.message || status.latestRun?.error || "Analysis failed. Please retry."}
+              </p>
             </div>
             <Button disabled={!canRunAnalysis || running} onClick={rerun} size="sm" variant="outline">
               Retry analysis

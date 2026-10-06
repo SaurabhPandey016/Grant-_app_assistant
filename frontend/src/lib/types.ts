@@ -16,6 +16,7 @@ export interface LatestRun {
   promptVersion?: string;
   startedAt?: string;
   finishedAt?: string | null;
+  error?: string | null;
 }
 
 export type EvidenceStatus = "SUPPORTED" | "PARTIAL" | "AMBIGUOUS" | "MISSING";
@@ -209,6 +210,13 @@ export interface ApiCompletionResponse {
 }
 export interface ApiAnalysisResponse {
   analysis: AnalysisResult;
+}
+export interface ApiAnalysisStartResponse {
+  run: LatestRun & { id: string; assessmentId: string };
+}
+export interface ApiAnalysisRunResponse {
+  run: LatestRun & { id: string; assessmentId: string; error: string | null };
+  analysis?: AnalysisResult;
 }
 export interface ApiSupportingDocumentsResponse {
   supportingDocuments: SupportingDocument[];

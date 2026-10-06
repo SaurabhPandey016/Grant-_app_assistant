@@ -7,7 +7,7 @@ export default [
   },
   eslint.configs.recommended,
   {
-    files: ['src/**/*.js', 'test/**/*.js', 'prisma/**/*.js', 'prisma.config.js', 'eslint.config.js'],
+    files: ['src/**/*.js', 'test/**/*.js', 'prisma/**/*.js', 'scripts/**/*.js', 'prisma.config.js', 'eslint.config.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

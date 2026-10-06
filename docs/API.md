@@ -20,6 +20,7 @@ An absent or non-owned resource is returned as 404. Assessment and review routes
 | Method | Path | Purpose | Auth |
 |---|---|---|---|
 | GET | `/health` | Database health check (`SELECT 1`). | No |
+| GET | `/api/v1/health` | Prefixed database health check (`SELECT 1`), suitable for deployment health checks. | No |
 | POST | `/api/v1/auth/register` | Register; validates name, email, and password; sets auth cookie. | No |
 | POST | `/api/v1/auth/login` | Login; validates credentials, rate-limited, audits success/failure; sets auth cookie. | No |
 | POST | `/api/v1/auth/logout` | Clear the auth cookie. | Yes |
@@ -37,9 +38,10 @@ An absent or non-owned resource is returned as 404. Assessment and review routes
 | GET | `/api/v1/assessments/:id/supporting-documents` | List supporting-document metadata. | Yes; owner |
 | PATCH | `/api/v1/assessments/:id/supporting-documents/:documentId` | Update metadata and/or link to a same-assessment requirement; validates link/type. | Yes; owner |
 | DELETE | `/api/v1/assessments/:id/supporting-documents/:documentId` | Delete a supporting-document metadata record. | Yes; owner |
-| POST | `/api/v1/assessments/:id/analysis` | Run the three-step analysis synchronously against the current document versions. | Yes; owner |
+| POST | `/api/v1/assessments/:id/analysis` | Start an asynchronous in-process analysis against current versions; returns `202` and a `RUNNING` run record. | Yes; owner |
 | GET | `/api/v1/assessments/:id/analysis/latest` | Get the latest completed analysis and human review fields. | Yes; owner |
 | GET | `/api/v1/assessments/:id/analysis/runs` | List analysis runs. | Yes; owner |
+| GET | `/api/v1/assessments/:id/analysis/runs/:runId` | Poll an owned run; returns status/error, and includes `analysis` when completed. | Yes; owner |
 | PATCH | `/api/v1/requirements/:id/mapping/review` | Confirm, correct, or reject a mapping; a correction requires `reviewerStatus`. Optional reviewer evidence is verified against the run's application version. | Yes; owner |
 | PATCH | `/api/v1/requirements/:id/level` | Set `levelOverride` to `MANDATORY`, `RECOMMENDED`, or `null`. | Yes; owner |
 | PATCH | `/api/v1/questions/:id` | Update a question's `status` and optional `answer`. | Yes; owner |
@@ -55,5 +57,6 @@ An absent or non-owned resource is returned as 404. Assessment and review routes
 - Document content is limited to 200,000 characters. Empty documents are rejected. File uploads accept UTF-8 `.txt` and `.md` only.
 - A content hash matching the current version returns that version with `unchanged: true` instead of inserting another version.
 - Login rate limit is five attempts per 15-minute window per client IP.
+- Analysis start returns immediately. Poll its run ID until status is `COMPLETED` or `FAILED`; the worker runs inside the same backend process and is not backed by a durable queue.
 - Review mutations are allowed on stale runs; mapping review responses include staleness.
 - There is no endpoint to update or delete an individual `DocumentVersion`.

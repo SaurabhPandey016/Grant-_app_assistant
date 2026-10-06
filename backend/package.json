@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js",
+    "start": "npm run db:generate && npm run db:deploy && node src/server.js",
+    "start:production": "npm run db:generate && npm run db:deploy && node src/server.js",
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:format": "prisma format",
@@ -16,9 +17,11 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "node prisma/seed.js",
-    "lint": "eslint src test prisma prisma.config.js eslint.config.js",
+    "db:seed:deployed": "node prisma/seed.js",
+    "lint": "eslint src test prisma scripts prisma.config.js eslint.config.js",
+    "smoke:deployment": "node scripts/smoke-test.js",
     "test": "npm run test:node && npm run test:domain",
-    "test:node": "node --import ./test/setup.js --test test/auth.test.js test/assessment.test.js test/analysis.test.js test/review.test.js test/review-summary.test.js test/ai.test.js",
+    "test:node": "node --import ./test/setup.js --test test/auth.test.js test/assessment.test.js test/analysis.test.js test/review.test.js test/review-summary.test.js test/ai.test.js test/cors.test.js",
     "test:domain": "vitest run test/domain"
   },
   "dependencies": {

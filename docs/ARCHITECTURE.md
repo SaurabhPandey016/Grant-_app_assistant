@@ -19,7 +19,7 @@ The backend follows routes → controllers → services → repositories. Routes
 
 The backend is JavaScript ESM with JSDoc types; the frontend is Next.js App Router with strict TypeScript. The Prisma schema uses PostgreSQL. Runtime connections use pooled `DATABASE_URL` via Prisma's PostgreSQL driver adapter; Prisma migration commands use `DIRECT_URL` from `prisma.config.js`. Prisma is version 7.10.0. The `prisma-client-js` generator is used to keep generated client code consumable by the no-TypeScript ESM backend; it is deprecated in Prisma 7 but retained for that constraint. Client generation and ESM configuration follow the official [Prisma 7 generator documentation](https://www.prisma.io/docs/orm/v7/prisma-schema/overview/generators), [Prisma Client setup](https://www.prisma.io/docs/orm/v7/prisma-client/setup-and-configuration/introduction), [Prisma config reference](https://www.prisma.io/docs/orm/v7/reference/prisma-config-reference), [PostgreSQL driver adapter guide](https://www.prisma.io/docs/orm/v7/core-concepts/supported-databases/postgresql), and [Supabase connection guidance](https://www.prisma.io/docs/orm/overview/databases/supabase).
 
-`GET /health` checks the database with `SELECT 1`. Pino logs request IDs and safe request metadata; document content, passwords, tokens, and provider keys are not logged. Audit events record selected authentication, document, analysis, review, and summary actions. See [docs/API.md](./API.md) for route details.
+`GET /health` and `GET /api/v1/health` check the database with `SELECT 1`. The Express app trusts one reverse-proxy hop for the client IP and applies an exact-origin credentialed CORS allowlist from `CORS_ORIGINS`; the frontend's same-origin Next.js rewrite does not require browser CORS. Pino logs request IDs and safe request metadata; document content, passwords, tokens, and provider keys are not logged. Audit events record selected authentication, document, analysis, review, and summary actions. See [docs/API.md](./API.md) for route details.
 
 ## Authentication and ownership
 
@@ -37,7 +37,7 @@ AI and reviewer citations refer to segment IDs within the exact immutable docume
 
 ## AI workflow and persistence
 
-An analysis is synchronous and has three structured-output steps:
+An analysis has three structured-output steps:
 
 1. **Extract requirements:** identify guideline requirements with text, category, mandatory/recommended level, document requirement metadata, and source segment/quote.
 2. **Map application content:** map each requirement to application evidence, with support status, rationale, and up to three evidence citations.
@@ -49,7 +49,9 @@ The provider contract is `completeJson({ system, user })`, returning response te
 
 The heuristic provider extracts sentences containing modal language, infers categories/document types with keyword rules, maps by keyword overlap (supported at 0.5 or above, partial at 0.25 or above, otherwise missing), excludes clearly negated sentences as positive evidence, asks about unsupported mandatory requirements, and flags numeric/outcome statements. It is a deliberately limited fallback, not equivalent to an LLM.
 
-Starting a run records the current guideline/application version IDs and provider/model/prompt metadata. An assessment-scoped database lock prevents concurrent running jobs. Requirements, mappings, questions, and claims are saved transactionally before the run becomes `COMPLETED`. On failure the run becomes `FAILED` with a user-safe message; technical errors are logged without document text. Run start, completion, and failure create audit events.
+Starting a run records the current guideline/application version IDs and provider/model/prompt metadata, then returns the run ID with HTTP 202. The analysis executes asynchronously in the same Node process; clients poll `GET /assessments/:id/analysis/runs/:runId`. An assessment-scoped database lock prevents concurrent running jobs. Requirements, mappings, questions, and claims are saved transactionally before the run becomes `COMPLETED`. On failure the run becomes `FAILED` with a user-safe message; technical errors are logged without document text. Run start, completion, and failure create audit events.
+
+This is an in-process worker, not a durable queue. A stopped/restarted process cannot resume an interrupted run. Before listening, the single-instance Render deployment marks previously `RUNNING` records as failed with a safe message and audit event. Keep the backend at one instance unless this recovery and worker coordination are replaced with a multi-instance-safe job system. The frontend polls every two seconds while the run is `RUNNING`.
 
 ## Scoring and human review
 
@@ -92,3 +94,5 @@ Foreign keys cascade most assessment-owned records. Analysis runs and summaries 
 ## Configuration
 
 The backend loads the repository-root `.env`; Prisma CLI configuration loads that same file. Runtime variables are defined in `.env.example`, and frontend `BACKEND_URL` is in `frontend/.env.example`. Examples contain names only. `DATABASE_URL` is required at runtime; `DIRECT_URL` is required for Prisma migrate/deploy. `JWT_SECRET` must be at least 32 characters. Set `LLM_PROVIDER=openai-compatible` only when the base URL, API key, and model are configured. See the root [README](../README.md) for the local setup.
+
+For the Render/Vercel/Supabase deployment checklist, environment variables, seed operation, health verification, and smoke-test script, see [README.md](../README.md#deployment-render-vercel-and-supabase).

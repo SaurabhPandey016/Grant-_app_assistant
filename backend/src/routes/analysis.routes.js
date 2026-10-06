@@ -13,9 +13,11 @@ export function createAnalysisRouter({
   const router = Router();
   const controller = createAnalysisController(service);
   router.param('id', validatePathParam());
+  router.param('runId', validatePathParam());
   router.use(requireAuth(authenticationService));
   router.post('/:id/analysis', asyncHandler(controller.run));
   router.get('/:id/analysis/latest', asyncHandler(controller.latest));
   router.get('/:id/analysis/runs', asyncHandler(controller.listRuns));
+  router.get('/:id/analysis/runs/:runId', asyncHandler(controller.runStatus));
   return router;
 }

@@ -18,7 +18,7 @@ Next.js App Router (frontend, TypeScript)
 Express API (backend, JavaScript ES modules)
   ├── Routes → Controllers → Services → Repositories → Prisma
   ├── Auth, immutable document versions, reviews, deterministic scoring
-  └── AI provider → zod-validated structured outputs
+  └── In-process analysis worker → AI provider → zod-validated structured outputs
                          │
                          ▼
                  PostgreSQL (Supabase)
@@ -48,7 +48,7 @@ For request layering, versioning, citation verification, AI steps, scoring, stal
 - Financial forecasting.
 - Legal advice or authoritative funding-eligibility decisions.
 - Multiple guidelines or applications in one assessment (each assessment currently has one current guideline and one current application; older versions are retained).
-- Asynchronous/background analysis jobs; analysis currently runs synchronously in the request.
+- A durable external job queue; analyses run asynchronously in the backend process and are polled by run ID.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ For request layering, versioning, citation verification, AI steps, scoring, stal
    Copy-Item frontend/.env.example frontend/.env.local
    ```
 
-   Fill in the values locally. Required backend values are `DATABASE_URL` and `JWT_SECRET` (at least 32 characters). Set `DIRECT_URL` for Prisma migration commands and `SEED_DEMO_PASSWORD` before seeding. `COOKIE_SECURE=true` is appropriate when the backend is served over HTTPS. For local HTTP development it can remain false.
+   Fill in the values locally. Required backend values are `DATABASE_URL` and `JWT_SECRET` (at least 32 characters). Set `DIRECT_URL` for Prisma migration commands and `SEED_DEMO_PASSWORD` before seeding. `COOKIE_SECURE=true` is appropriate when the backend is served over HTTPS. For local HTTP development it can remain false. `CORS_ORIGINS` is a comma-separated list of exact origins (scheme and hostname, no path); it can be empty for local Next.js rewrite development.
 
    The AI configuration is optional when using the offline default `LLM_PROVIDER=heuristic`. To use the configured live provider, set `LLM_PROVIDER=openai-compatible`, `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`; `LLM_TIMEOUT_MS` sets the request timeout. The backend retries a live provider once and then reports heuristic fallback if the transport still fails. It does not silently fall back when structured model output remains invalid.
 
@@ -108,7 +108,7 @@ For request layering, versioning, citation verification, AI steps, scoring, stal
    npm --prefix frontend run dev
    ```
 
-   Open `http://localhost:3000`. Register a user or sign in with the demo account. Backend health is available at `http://localhost:3001/health`; it executes a database `SELECT 1`, so it reports an error if PostgreSQL is unavailable.
+   Open `http://localhost:3000`. Register a user or sign in with the demo account. Backend health is available at `http://localhost:3001/health` and `http://localhost:3001/api/v1/health`; it executes a database `SELECT 1`, so it reports an error if PostgreSQL is unavailable.
 
 ## Example documents
 
@@ -164,22 +164,62 @@ npm --prefix frontend run build
 - Assessment deletion has not been validated against a live PostgreSQL database; run/document-version foreign keys include both cascade and restrict actions.
 - The sample data is fictional. The application does not establish legal compliance or funding eligibility.
 
-## Deployment
+## Deployment: Render, Vercel, and Supabase
 
-No production deployment target, hosted URL, or deployment pipeline is configured in this repository. A reasonable deployment topology is a Next.js host such as Vercel for the frontend, a Node.js web-service host for the Express backend, and Supabase PostgreSQL. These are deployment options, not a claim that the app is currently deployed or verified on those platforms.
+Deployment files are provided, but no production project/domain has been configured or deployed from this repository.
 
-Configure the following environment variables in the appropriate service settings (use the root `.env.example` and `frontend/.env.example` as the authoritative name lists):
+### 1. Supabase PostgreSQL
 
-- Backend runtime: `NODE_ENV`, `PORT`, `LOG_LEVEL`, `DATABASE_URL`, `JWT_SECRET`, `COOKIE_SECURE`, `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_TIMEOUT_MS`.
-- Migration job: `DIRECT_URL`.
-- One-time seed: `SEED_DEMO_PASSWORD`.
-- Frontend build/runtime: `BACKEND_URL`.
+1. Create a Supabase project and wait for the database to be ready.
+2. Copy the **transaction pooler** connection string into Render `DATABASE_URL` for API runtime connections.
+3. Copy the direct database connection string into Render `DIRECT_URL` for Prisma schema migration commands. Use the connection mode and SSL parameters recommended in the Supabase dashboard.
+4. Do not add credentials to this repository or to a frontend environment variable.
 
-Run `npm run db:deploy` as a release/migration step with `DIRECT_URL`; run the backend with `npm start`, and the frontend with `npm run build` then `npm start`. The unauthenticated health endpoint is `GET /health`. Set cookies Secure when the public app uses HTTPS and configure the frontend's `BACKEND_URL` to the reachable backend origin. If a chosen free-tier host suspends idle services, its first request after idle time may have a cold-start delay; check the provider's current plan and limits.
+### 2. Render backend
+
+1. Create a Render Blueprint from the repository root, using [render.yaml](./render.yaml), or create a Node web service manually with `backend/` as its root directory.
+2. The Blueprint build command is `npm ci && npm run db:generate`. Its start command runs `prisma generate`, `prisma migrate deploy`, then `node src/server.js`. Migrations therefore run at service startup and require `DIRECT_URL` to be set in the Render service environment.
+3. Configure these backend variables in Render:
+   - `NODE_ENV=production`
+   - `DATABASE_URL` = Supabase pooled connection URL
+   - `DIRECT_URL` = Supabase direct connection URL for migrations
+   - `JWT_SECRET` = a randomly generated secret of at least 32 characters (the Blueprint requests a generated value)
+   - `COOKIE_SECURE=true`
+   - `CORS_ORIGINS=https://<your-vercel-domain>` (comma-separate any additional exact origins; do not include paths or a trailing slash)
+   - `LOG_LEVEL=info`
+   - `LLM_PROVIDER=heuristic` to start without a paid provider key, or `LLM_PROVIDER=openai-compatible` plus `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL` for a live provider. `LLM_TIMEOUT_MS` defaults to 30000 and may be set up to 120000.
+   - Render supplies `PORT`. Do not hard-code it.
+4. Set the Render health check path to `/api/v1/health`. The app also responds at `/health`; both routes perform a database `SELECT 1`.
+5. Use a single Render web-service instance with the current in-process analysis worker. On startup, `RUNNING` runs left by a stopped process are marked failed with a safe message. This is not a durable queue; do not scale the service to multiple instances without replacing/reworking that startup recovery and worker coordination.
+
+The existing idempotent seed is `backend/prisma/seed.js`, run as `npm run db:seed` (or `npm run db:seed:deployed`) from the backend service shell. To seed a demo user safely, provide `SEED_DEMO_PASSWORD` only for the one-off seed execution, then remove it from persistent service environment settings. The seed creates `demo@grants.test`; it does not reset the password of an existing demo account. Do not paste the password into source, logs, or this repository.
+
+### 3. Vercel frontend
+
+1. Import the repository into Vercel and set the project Root Directory to `frontend/`.
+2. Set `BACKEND_URL` in Vercel's Environment Variables for each environment that should access the backend. Use the Render service's base HTTPS origin only, for example `https://<render-service>.onrender.com`; omit `/api/v1` and omit the trailing slash.
+3. Redeploy after setting or changing `BACKEND_URL`. [next.config.ts](./frontend/next.config.ts) rewrites `/api/:path*` to `${BACKEND_URL}/api/v1/:path*`, so the browser uses same-origin `/api/...` paths and the rewrite forwards requests and auth cookies to Render.
+4. Set the Vercel site's exact origin in Render `CORS_ORIGINS` for any direct browser-to-API calls or preflight requests. The current frontend uses the same-origin rewrite. `SameSite=Lax`, `HttpOnly`, and `Secure` cookies are enabled in production; cookie `Path=/` keeps them available to rewritten API requests.
+
+### 4. Verify and smoke-test
+
+1. After Render reports the service healthy, open `https://<render-service>.onrender.com/api/v1/health`; expect JSON with `status: "ok"` and `database: "ok"`.
+2. For a seeded test account, set `API_BASE_URL` to the Render base URL, `SMOKE_TEST_EMAIL` to `demo@grants.test`, and `SMOKE_TEST_PASSWORD` to the one-time seed password in a local ignored `.env` file. Alternatively use any account created through the UI.
+3. From the repository root, run:
+
+   ```powershell
+   npm --prefix backend run smoke:deployment
+   ```
+
+   The script checks health, logs in, creates a temporary assessment, uploads the three sample fixture records (guideline, application, and supporting-document metadata), starts analysis and polls its run ID, fetches completion, and deletes the temporary assessment. It prints pass/fail step names, not credentials. If a step fails, it attempts cleanup and reports the API's safe error message.
+
+### Free-tier sleep and uptime
+
+Render Free web services may spin down after a period without inbound requests (historically around 15 minutes) and the first request after sleep can take about a minute to wake the service. Check Render's current free-plan limits before relying on this behavior. An uptime monitor can ping `https://<render-service>.onrender.com/api/v1/health` every 10–14 minutes to reduce idle sleep, subject to Render's current terms and availability; this is not a guaranteed availability mechanism. Health pings also require the database to be reachable. Long-running jobs may be interrupted by service restarts; they are surfaced as failed after the next process starts, not resumed.
 
 ## Secrets
 
-Never commit `.env`, `.env.local`, real API keys, database connection strings, JWT secrets, or demo passwords. The examples contain variable names only. Keep real credentials in local ignored environment files or the deployment provider's secret settings. Do not submit confidential personal, financial, or applicant data to a free model tier unless its current data-use terms are acceptable.
+Never commit `.env`, `.env.local`, real API keys, database connection strings, JWT secrets, smoke-test passwords, or demo passwords. The examples contain variable names only. Keep real credentials in local ignored environment files or the deployment provider's secret settings. Do not submit confidential personal, financial, or applicant data to a free model tier unless its current data-use terms are acceptable.
 
 ## Disclaimer
 

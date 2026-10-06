@@ -238,6 +238,59 @@ export function listAnalysisRunsForUser(assessmentId, userId) {
 }
 
 /**
+ * @param {string} assessmentId
+ * @param {string} runId
+ * @param {string} userId
+ */
+export function findAnalysisRunForUser(assessmentId, runId, userId) {
+  return prisma.analysisRun.findFirst({
+    where: { id: runId, assessmentId, assessment: { userId } },
+    include: {
+      requirements: {
+        orderBy: { code: 'asc' },
+        include: { mapping: true },
+      },
+      clarificationQuestions: { orderBy: { createdAt: 'asc' } },
+      unsupportedClaims: { orderBy: { createdAt: 'asc' } },
+    },
+  });
+}
+
+/**
+ * Mark runs left RUNNING by a stopped web process as failed before accepting traffic.
+ * @param {{ message: string }} input
+ */
+export function failInterruptedAnalysisRuns(input) {
+  return prisma.$transaction(async (transaction) => {
+    const runs = await transaction.analysisRun.findMany({
+      where: { status: 'RUNNING' },
+      select: { id: true, assessmentId: true },
+    });
+    if (runs.length === 0) return 0;
+
+    const finishedAt = new Date();
+    await transaction.analysisRun.updateMany({
+      where: { id: { in: runs.map((run) => run.id) }, status: 'RUNNING' },
+      data: {
+        status: 'FAILED',
+        error: input.message,
+        finishedAt,
+      },
+    });
+    await transaction.auditEvent.createMany({
+      data: runs.map((run) => ({
+        assessmentId: run.assessmentId,
+        action: 'analysis.failed',
+        entityType: 'AnalysisRun',
+        entityId: run.id,
+        metadata: { reason: 'WORKER_RESTART' },
+      })),
+    });
+    return runs.length;
+  });
+}
+
+/**
  * @param {string} requirementId
  * @param {string} userId
  * @param {{ decision: string, reviewerStatus?: string, evidence?: object[], note?: string | null }} input
