@@ -6,7 +6,10 @@ dotenv.config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) }
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+  PORT: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.coerce.number().int().min(1).max(65535).default(10000),
+  ),
   LOG_LEVEL: z.preprocess(
     (value) => (value === '' ? undefined : value),
     z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
