@@ -13,7 +13,10 @@ import { prisma } from './prisma.js';
 export function startAnalysisRunForUser(input) {
   return prisma.$transaction(async (transaction) => {
     // Read committed gives the post-lock query a fresh snapshot of runs committed while waiting.
-    await transaction.$queryRaw`SELECT pg_advisory_xact_lock(0, hashtext(${input.assessmentId}))`;
+    await transaction.$queryRaw`
+      SELECT 1 AS locked
+      FROM (SELECT pg_advisory_xact_lock(0, hashtext(${input.assessmentId})) AS lock_result) AS advisory_lock
+    `;
 
     const assessment = await transaction.assessment.findFirst({
       where: { id: input.assessmentId, userId: input.userId },
@@ -72,6 +75,7 @@ export function startAnalysisRunForUser(input) {
  * @param {{ runId: string, userId: string, provider: string, model: string, promptVersion: string, requirements: object[], mappings: object[], questions: object[], unsupportedClaims: object[] }} input
  */
 export function completeAnalysisRun(input) {
+  // Sequential inserts over a remote PostgreSQL connection can exceed Prisma's 5s default.
   return prisma.$transaction(async (transaction) => {
     const requirementIds = new Map();
     for (const requirement of input.requirements) {
@@ -162,7 +166,7 @@ export function completeAnalysisRun(input) {
       },
     });
     return run;
-  });
+  }, { timeout: 30_000 });
 }
 
 /**

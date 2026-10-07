@@ -151,8 +151,8 @@ model AnalysisRun {
   startedAt              DateTime                @default(now())
   finishedAt             DateTime?
   assessment             Assessment              @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  guidelineVersion       DocumentVersion         @relation("RunGuidelineVersion", fields: [guidelineVersionId], references: [id], onDelete: Restrict)
-  applicationVersion     DocumentVersion         @relation("RunApplicationVersion", fields: [applicationVersionId], references: [id], onDelete: Restrict)
+  guidelineVersion       DocumentVersion         @relation("RunGuidelineVersion", fields: [guidelineVersionId], references: [id], onDelete: Cascade)
+  applicationVersion     DocumentVersion         @relation("RunApplicationVersion", fields: [applicationVersionId], references: [id], onDelete: Cascade)
   requirements           Requirement[]
   clarificationQuestions ClarificationQuestion[]
   unsupportedClaims      UnsupportedClaim[]
@@ -254,8 +254,8 @@ model ReviewSummary {
   applicationVersionId String
   generatedById        String
   run                  AnalysisRun     @relation(fields: [runId], references: [id], onDelete: Cascade)
-  guidelineVersion     DocumentVersion @relation("SummaryGuidelineVersion", fields: [guidelineVersionId], references: [id], onDelete: Restrict)
-  applicationVersion   DocumentVersion @relation("SummaryApplicationVersion", fields: [applicationVersionId], references: [id], onDelete: Restrict)
+  guidelineVersion     DocumentVersion @relation("SummaryGuidelineVersion", fields: [guidelineVersionId], references: [id], onDelete: Cascade)
+  applicationVersion  DocumentVersion @relation("SummaryApplicationVersion", fields: [applicationVersionId], references: [id], onDelete: Cascade)
   generatedBy          User            @relation("SummaryGenerator", fields: [generatedById], references: [id], onDelete: Restrict)
   createdAt            DateTime        @default(now())
 
