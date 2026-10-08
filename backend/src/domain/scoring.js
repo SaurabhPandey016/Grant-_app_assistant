@@ -30,28 +30,33 @@ export function effectiveStatus(mapping) {
 
 /**
  * @param {ScorableMapping} mapping
+ * @param {boolean} [sourceVerified]
  * @returns {boolean}
  */
-export function isSatisfied(mapping) {
-  return effectiveStatus(mapping) === 'SUPPORTED'
+export function isSatisfied(mapping, sourceVerified = true) {
+  return sourceVerified !== false
+    && effectiveStatus(mapping) === 'SUPPORTED'
     && (mapping.reviewDecision === 'CORRECTED' || mapping.allVerified === true);
 }
 
 /**
  * @param {ScorableMapping} mapping
+ * @param {boolean} [sourceVerified]
  * @returns {boolean}
  */
-export function confirmedSatisfied(mapping) {
+export function confirmedSatisfied(mapping, sourceVerified = true) {
   return (mapping.reviewDecision === 'CONFIRMED' || mapping.reviewDecision === 'CORRECTED')
-    && isSatisfied(mapping);
+    && isSatisfied(mapping, sourceVerified);
 }
 
 /**
  * @param {ScorableMapping} mapping
+ * @param {boolean} [sourceVerified]
  * @returns {boolean}
  */
-export function aiSuggestedSatisfied(mapping) {
-  return mapping.reviewDecision === 'PENDING'
+export function aiSuggestedSatisfied(mapping, sourceVerified = true) {
+  return sourceVerified !== false
+    && mapping.reviewDecision === 'PENDING'
     && mapping.aiStatus === 'SUPPORTED'
     && mapping.allVerified === true;
 }
@@ -127,7 +132,8 @@ export function computeCompletion(requirements, supportingDocs) {
     recommended,
     outstandingMandatory: mandatoryRequirements
       .filter((requirement) => (
-        !requirement.mapping || !confirmedSatisfied(requirement.mapping)
+        !requirement.mapping
+        || !confirmedSatisfied(requirement.mapping, requirement.sourceVerified !== false)
       ))
       .map(({ code, text }) => ({ code, text })),
     pendingReviewCount: requirements.filter(
@@ -146,10 +152,12 @@ function normalizeDocumentType(value) {
 
 function summarizeLevel(requirements) {
   const confirmedMet = requirements.filter(
-    (requirement) => requirement.mapping && confirmedSatisfied(requirement.mapping),
+    (requirement) => requirement.mapping
+      && confirmedSatisfied(requirement.mapping, requirement.sourceVerified !== false),
   ).length;
   const aiSuggestedMet = requirements.filter(
-    (requirement) => requirement.mapping && aiSuggestedSatisfied(requirement.mapping),
+    (requirement) => requirement.mapping
+      && aiSuggestedSatisfied(requirement.mapping, requirement.sourceVerified !== false),
   ).length;
   const total = requirements.length;
   return {

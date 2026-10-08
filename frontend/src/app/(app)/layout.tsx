@@ -7,8 +7,8 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { BackendConnectionState } from "@/components/shared/backend-connection-state";
 import { ErrorState } from "@/components/shared/error-state";
-import { LoadingSkeleton } from "@/components/shared/loading-skeleton";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { apiRequest } from "@/lib/api";
 
@@ -33,12 +33,8 @@ export default function AppLayout({ children }: Readonly<{ children: React.React
     }
   }
 
-  if (userQuery.isLoading || userQuery.isFetching) {
-    return (
-      <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        <LoadingSkeleton rows={3} />
-      </div>
-    );
+  if (userQuery.isLoading) {
+    return <BackendConnectionState />;
   }
 
   if (userQuery.error) {

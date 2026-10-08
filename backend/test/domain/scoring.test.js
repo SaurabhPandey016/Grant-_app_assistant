@@ -63,6 +63,31 @@ describe('satisfaction', () => {
       allVerified: true,
     }))).toBe(true);
   });
+
+  it('does not count a mapping when the requirement source citation is unverified', () => {
+    const requirements = [
+      {
+        code: 'R1',
+        text: 'Unverified source',
+        aiLevel: 'MANDATORY',
+        sourceVerified: false,
+        mapping: mapping(),
+      },
+      {
+        code: 'R2',
+        text: 'Human-reviewed but unverified source',
+        aiLevel: 'MANDATORY',
+        sourceVerified: false,
+        mapping: mapping({ reviewDecision: 'CONFIRMED' }),
+      },
+    ];
+
+    const result = computeCompletion(requirements, []);
+    expect(result.mandatory.confirmedMet).toBe(0);
+    expect(result.mandatory.aiSuggestedMet).toBe(0);
+    expect(result.outstandingMandatory).toHaveLength(2);
+    expect(isSatisfied(mapping(), false)).toBe(false);
+  });
 });
 
 describe('completion scoring', () => {

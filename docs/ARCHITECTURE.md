@@ -4,7 +4,7 @@
 
 ```text
 frontend (Next.js App Router, strict TypeScript)
-  └── typed fetch /api/* ── Next.js rewrite ──► backend /api/v1/*
+  └── typed fetch /api/* ── Next.js proxy route ──► backend /api/v1/*
                                                    │
 backend (Express, JavaScript ES modules)            │
   routes → controllers → services → repositories ──┼──► Prisma 7 → PostgreSQL
@@ -19,7 +19,7 @@ The backend follows routes → controllers → services → repositories. Routes
 
 The backend is JavaScript ESM with JSDoc types; the frontend is Next.js App Router with strict TypeScript. The Prisma schema uses PostgreSQL. Runtime connections use pooled `DATABASE_URL` via Prisma's PostgreSQL driver adapter; Prisma migration commands use `DIRECT_URL` from `prisma.config.js`. Prisma is version 7.10.0. The `prisma-client-js` generator is used to keep generated client code consumable by the no-TypeScript ESM backend; it is deprecated in Prisma 7 but retained for that constraint. Client generation and ESM configuration follow the official [Prisma 7 generator documentation](https://www.prisma.io/docs/orm/v7/prisma-schema/overview/generators), [Prisma Client setup](https://www.prisma.io/docs/orm/v7/prisma-client/setup-and-configuration/introduction), [Prisma config reference](https://www.prisma.io/docs/orm/v7/reference/prisma-config-reference), [PostgreSQL driver adapter guide](https://www.prisma.io/docs/orm/v7/core-concepts/supported-databases/postgresql), and [Supabase connection guidance](https://www.prisma.io/docs/orm/overview/databases/supabase).
 
-`GET /health` and `GET /api/v1/health` check the database with `SELECT 1`. The Express app trusts one reverse-proxy hop for the client IP and applies an exact-origin credentialed CORS allowlist from `CORS_ORIGINS`; the frontend's same-origin Next.js rewrite does not require browser CORS. Pino logs request IDs and safe request metadata; document content, passwords, tokens, and provider keys are not logged. Audit events record selected authentication, document, analysis, review, and summary actions. See [docs/API.md](./API.md) for route details.
+`GET /health` and `GET /api/v1/health` check the database with `SELECT 1`. The Express app trusts one reverse-proxy hop for the client IP and applies an exact-origin credentialed CORS allowlist from `CORS_ORIGINS`; the frontend's same-origin Next.js proxy route forwards the browser origin and auth cookies. If the backend connection resets, the proxy returns a structured retryable `503` instead of exposing Next.js rewrite/socket errors; the current-user query retries transient failures while Render wakes. Pino logs request IDs and safe request metadata; document content, passwords, tokens, and provider keys are not logged. Audit events record selected authentication, document, analysis, review, and summary actions. See [docs/API.md](./API.md) for route details.
 
 ## Authentication and ownership
 
@@ -61,7 +61,7 @@ The effective status of a mapping is:
 - `CORRECTED` → `reviewerStatus` (or `MISSING` if absent)
 - `CONFIRMED` or `PENDING` → `aiStatus`
 
-A mapping is satisfied only when its effective status is `SUPPORTED` and either the review decision is `CORRECTED` or all AI evidence is verified. Thus a confirmed mapping still requires verified AI citations; a correction uses the reviewer's status and evidence. Confirmed completion counts mappings in `CONFIRMED` or `CORRECTED` state that satisfy this rule. AI-suggested completion counts only `PENDING` mappings with verified `SUPPORTED` AI evidence.
+A mapping is satisfied only when its effective status is `SUPPORTED`, the requirement's guideline source citation is verified, and either the review decision is `CORRECTED` or all AI application evidence is verified. Thus a confirmed mapping requires both a verified guideline source and verified AI application citations; a correction may replace the application evidence, but cannot make an unverified guideline requirement count. Confirmed completion counts mappings in `CONFIRMED` or `CORRECTED` state that satisfy this rule. AI-suggested completion counts only `PENDING` mappings with verified `SUPPORTED` AI evidence and a verified guideline source citation.
 
 Requirement level is `levelOverride ?? aiLevel`. Mandatory and recommended totals, confirmed counts, and AI-suggested counts are separate; percentage is zero when the level has no requirements. The completion result also reports outstanding mandatory requirements, pending mapping count, disputed-level count, unverified-citation count, and missing supporting documents. Document types are compared case-insensitively after punctuation/separators are removed. Labels use neutral confirmed-count wording.
 
@@ -89,7 +89,7 @@ Review endpoints allow owners to confirm/correct/reject mappings, override requi
 - **ReviewSummary:** run, JSON content, exact guideline/application version IDs, generator, creation time.
 - **AuditEvent:** optional assessment and actor, action/entity identity, JSON metadata, creation time.
 
-Foreign keys cascade most assessment-owned records. Analysis runs and summaries restrict deletion of the document versions they reference; validate assessment deletion against a real PostgreSQL database before relying on it in production. The test suite uses mocked repositories for this operation and does not prove the database's cascade/restrict behavior.
+Foreign keys cascade assessment-owned runs and summaries, including dependent records tied to their pinned document versions, when an assessment is deleted. Individual document versions have no update/delete API and are immutable for the lifetime of their assessment. Assessment deletion and cascading cleanup were exercised against the configured PostgreSQL database; deletion is permanent.
 
 ## Configuration
 

@@ -14,7 +14,12 @@ export function useCurrentUser() {
       const result = await apiRequest<ApiUserResponse>("/api/auth/me");
       return result.user;
     },
-    retry: false,
+    retry: (failureCount, error) => {
+      if (failureCount >= 30) return false;
+      if (error instanceof TypeError) return true;
+      return error instanceof ApiError && error.status >= 500 && error.status <= 504;
+    },
+    retryDelay: 2_000,
   });
 
   useEffect(() => {

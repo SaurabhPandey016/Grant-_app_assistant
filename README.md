@@ -13,7 +13,7 @@ Browser
   │
   ▼
 Next.js App Router (frontend, TypeScript)
-  │ /api/* rewrite; HTTP-only auth cookie
+  │ same-origin /api/* proxy; HTTP-only auth cookie
   ▼
 Express API (backend, JavaScript ES modules)
   ├── Routes → Controllers → Services → Repositories → Prisma
@@ -68,11 +68,11 @@ For request layering, versioning, citation verification, AI steps, scoring, stal
    Copy-Item frontend/.env.example frontend/.env.local
    ```
 
-   Fill in the values locally. Required backend values are `DATABASE_URL` and `JWT_SECRET` (at least 32 characters). Set `DIRECT_URL` for Prisma migration commands and `SEED_DEMO_PASSWORD` before seeding. `COOKIE_SECURE=true` is appropriate when the backend is served over HTTPS. For local HTTP development it can remain false. `CORS_ORIGINS` is a comma-separated list of exact origins (scheme and hostname, no path); include `http://localhost:3000,http://127.0.0.1:3000` for local frontend development. The same-origin Next.js rewrite forwards the browser's `Origin` header to the backend, so an empty allowlist blocks sign-in and registration requests.
+   Fill in the values locally. Required backend values are `DATABASE_URL` and `JWT_SECRET` (at least 32 characters). Set `DIRECT_URL` for Prisma migration commands and `SEED_DEMO_PASSWORD` before seeding. `COOKIE_SECURE=true` is appropriate when the backend is served over HTTPS. For local HTTP development it can remain false. `CORS_ORIGINS` is a comma-separated list of exact origins (scheme and hostname, no path); include `http://localhost:3000,http://127.0.0.1:3000` for local frontend development. The same-origin Next.js proxy forwards the browser's `Origin` header to the backend, so an empty allowlist blocks sign-in and registration requests.
 
    The AI configuration is optional when using the offline default `LLM_PROVIDER=heuristic`. To use the configured live provider, set `LLM_PROVIDER=openai-compatible`, `LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`; `LLM_TIMEOUT_MS` sets the request timeout. The backend retries a live provider once and then reports heuristic fallback if the transport still fails. It does not silently fall back when structured model output remains invalid.
 
-   `frontend/.env.local` needs `BACKEND_URL`, normally `http://localhost:3001`. Next.js rewrites frontend `/api/*` requests to the backend's `/api/v1/*` routes. The backend dev command uses port `3001` by default, independently of a deployment `PORT` value in the root `.env`; the production start command still honors `PORT`.
+   `frontend/.env.local` needs `BACKEND_URL`, normally `http://localhost:3001`. A Next.js route handler proxies frontend `/api/*` requests to the backend's `/api/v1/*` routes; transient upstream connection resets become retryable `503` responses rather than failed rewrite requests. The backend dev command uses port `3001` by default, independently of a deployment `PORT` value in the root `.env`; the production start command still honors `PORT`.
 
 3. **Install dependencies, generate Prisma Client, and apply migrations.**
 
@@ -132,7 +132,7 @@ Every output must parse as JSON and pass zod schemas before the workflow stores 
 
 Citation verification is deterministic and exact: the cited segment ID must exist in the relevant immutable version, the normalized quote must occur in that segment, and the quote must contain at least 12 characters. There is no fuzzy match. Unverified AI evidence cannot satisfy a requirement. Reviewers may correct a mapping and attach evidence, which is checked against the application version used by that run.
 
-The effective status is `REJECTED` → `MISSING`, `CORRECTED` → reviewer status, otherwise AI status. A requirement is satisfied when its effective status is `SUPPORTED` and either a reviewer corrected it or all AI evidence is verified. Confirmed numbers include confirmed/corrected mappings; AI-suggested numbers count only pending mappings with verified `SUPPORTED` evidence. Levels use `levelOverride ?? aiLevel`; mandatory and recommended totals are reported separately. These are workflow metrics, not eligibility determinations.
+The effective status is `REJECTED` → `MISSING`, `CORRECTED` → reviewer status, otherwise AI status. A requirement is satisfied when its effective status is `SUPPORTED`, its guideline source citation is verified, and either a reviewer corrected it or all AI application evidence is verified. Confirmed numbers include confirmed/corrected mappings meeting that rule; AI-suggested numbers count only pending mappings with verified `SUPPORTED` evidence and a verified guideline source. Levels use `levelOverride ?? aiLevel`; mandatory and recommended totals are reported separately. These are workflow metrics, not eligibility determinations.
 
 An assessment is stale when the latest run's guideline or application version ID differs from the respective current version ID. No analysis run is reported as `NO_RUN`. Uploading identical normalized content reuses the current version; changed content creates a new immutable version and causes an older run to be stale.
 
@@ -158,10 +158,10 @@ npm --prefix frontend run build
 ## Known limitations
 
 - Each guideline and application is limited to 200,000 characters. There is no OCR, scanned-PDF ingestion, or general file-format support; uploads accept `.txt` and `.md`.
-- Analysis is synchronous and may take up to a minute. Large documents and slow provider responses can exceed hosting request timeouts.
+- The analysis endpoint returns a run ID immediately and the frontend polls while analysis runs in the same backend process. The free Render service may sleep while idle; the first request can take time to wake it, and the frontend displays a wake-up message and retries session checks for up to about one minute.
 - LLM outputs and classifications can vary. Schema validation and citation checks constrain the outputs but do not make the model's interpretation authoritative.
 - The heuristic fallback is intentionally crude: it uses sentence/keyword rules and may miss nuance or misclassify requirements and evidence.
-- Assessment deletion has not been validated against a live PostgreSQL database; run/document-version foreign keys include both cascade and restrict actions.
+- Assessment deletion and cascading cleanup have been exercised against the configured PostgreSQL database. Keep backups for important data; deletion permanently removes the assessment and its dependent records.
 - The sample data is fictional. The application does not establish legal compliance or funding eligibility.
 
 ## Deployment: Render, Vercel, and Supabase
@@ -198,8 +198,8 @@ The existing idempotent seed is `backend/prisma/seed.js`, run as `npm run db:see
 
 1. Import the repository into Vercel and set the project Root Directory to `frontend/`.
 2. Set `BACKEND_URL` in Vercel's Environment Variables for each environment that should access the backend. Use the Render service's base HTTPS origin only, for example `https://<render-service>.onrender.com`; omit `/api/v1` and omit the trailing slash.
-3. Redeploy after setting or changing `BACKEND_URL`. [next.config.ts](./frontend/next.config.ts) rewrites `/api/:path*` to `${BACKEND_URL}/api/v1/:path*`, so the browser uses same-origin `/api/...` paths and the rewrite forwards requests and auth cookies to Render.
-4. Set the Vercel site's exact origin in Render `CORS_ORIGINS` for any direct browser-to-API calls or preflight requests. The current frontend uses the same-origin rewrite. `SameSite=Lax`, `HttpOnly`, and `Secure` cookies are enabled in production; cookie `Path=/` keeps them available to rewritten API requests.
+3. Redeploy after setting or changing `BACKEND_URL`. [route.ts](./frontend/src/app/api/%5B...path%5D/route.ts) proxies same-origin `/api/...` requests to `${BACKEND_URL}/api/v1/...`, preserving auth cookies and returning a retryable `503` if the Render service resets the connection while waking.
+4. Set the Vercel site's exact origin in Render `CORS_ORIGINS` for any direct browser-to-API calls or preflight requests. The current frontend uses the same-origin proxy. `SameSite=Lax`, `HttpOnly`, and `Secure` cookies are enabled in production; cookie `Path=/` keeps them available to proxied API requests.
 
 ### 4. Verify and smoke-test
 

@@ -18,4 +18,4 @@ General expectations: usable frontend, working backend, basic persistence, funct
 - Guideline and application documents are versioned immutably. An assessment is marked stale when its latest run references different current document versions.
 - The application presents a clear disclaimer and does not make authoritative legal or funding-eligibility decisions.
 - The implemented AI providers are an OpenAI-compatible provider and a deterministic offline heuristic provider. Live AI configuration is optional.
-- Hosting has not been selected or configured in this repository; deployment platforms described in the README are options, not a deployed environment.
+- Render, Vercel, and Supabase are the intended deployment platforms and deployment configuration/guidance is included in the repository. No production deployment has been executed or verified from this workspace.
